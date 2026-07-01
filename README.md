@@ -37,7 +37,51 @@ The calculator also reports:
   flag (interior frame surface temp <= dew point).
 - A **CSA A440 / NAFS-style temperature index**: `100 * (T_interior -
   T_outdoor) / (T_indoor - T_outdoor)`, the standard metric used in Canadian
-  fenestration condensation-resistance ratings.
+  fenestration condensation-resistance ratings. This is always computed
+  against the true ambient outdoor air temperature (not sol-air), matching
+  how the index is actually measured -- in a chamber, with no solar load. It
+  can go outside the usual 0-100% range under strong solar gain, since that's
+  outside what the index was designed to describe.
+- A **frame heat distortion risk** flag for solar-warmed dark frames (see
+  below).
+
+## Orientation and frame colour (solar gain)
+
+Solar radiation absorbed by the exterior frame surface is folded into the
+same resistance network using the standard **sol-air temperature** method
+(ASHRAE): the effective outdoor temperature seen by the exterior film
+resistance is raised by `(absorptivity * incident irradiance) / h_o`. This
+means a sunlit dark frame can end up much hotter than the ambient air, and
+the heat flow can even reverse (flow inward) under strong solar load.
+
+`--orientation` (`N/NE/E/SE/S/SW/W/NW`) and `--solar-scenario` select a
+peak clear-sky irradiance from an approximate table for ~49.25°N latitude
+(Vancouver):
+
+| Scenario | Meaning |
+|---|---|
+| `winter_design` (default) | No solar at all -- nighttime/overcast worst case used for condensation-risk design, matching how CSA A440/NFRC condensation resistance is actually tested (no solar load). |
+| `winter_sunny` | Clear winter day at solar noon. Low sun angle means south gets strong direct gain, north gets only diffuse. |
+| `summer_peak` | Clear-sky peak near the summer solstice. High sun angle reduces south gain but boosts east (morning) and west (afternoon) -- the classic case for dark vinyl frame overheating on west elevations. |
+
+These are illustrative design values, not measured Vancouver TMY data --
+pass `--solar-irradiance <W/m^2>` directly if you have local solar data for
+a specific hour.
+
+`--frame-colour` sets the frame's solar absorptivity:
+
+| Colour | Absorptivity |
+|---|---|
+| `white` (default) | 0.30 |
+| `almond` | 0.45 |
+| `grey` | 0.55 |
+| `bronze` | 0.65 |
+| `black` | 0.85 |
+
+Darker colours absorb far more solar energy -- this is why vinyl extruders
+generally restrict dark colours to specially heat-stabilized compounds. The
+calculator flags `frame_distortion_risk` when the exterior surface exceeds
+76 °C, a commonly cited threshold for vinyl profile heat distortion/warping.
 
 ## Default climate: Vancouver winter design conditions
 
@@ -66,6 +110,13 @@ Or pass `--frame-u-factor` with a manufacturer-supplied NFRC/CSA number.
 python3 -m window_frame_temp --frame standard_vinyl --storey 1
 python3 -m window_frame_temp --frame foam_filled_vinyl --storey 6
 python3 -m window_frame_temp --frame-u-factor 1.8 --storey 4 --indoor-rh 40
+
+# Winter condensation check, sunny south elevation (partially offsets condensation risk)
+python3 -m window_frame_temp --storey 6 --orientation S --solar-scenario winter_sunny
+
+# Summer overheating/warping check, west elevation, black frame
+python3 -m window_frame_temp --storey 4 --orientation W --frame-colour black \
+    --solar-scenario summer_peak --indoor-temp 24 --indoor-rh 45 --outdoor-temp 28 --wind-speed 2.0
 ```
 
 `--storey` must be between 1 and 6, matching the six-storey building this

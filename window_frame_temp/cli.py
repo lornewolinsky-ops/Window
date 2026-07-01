@@ -6,6 +6,7 @@ import sys
 from .calculator import compute_frame_temperature
 from .climate import ClimateDesignPoint, VANCOUVER_WINTER_DESIGN
 from .frame import FRAME_PRESETS_NFRC_U_FACTOR, FrameProfile, get_frame_profile
+from .solar import FRAME_COLOR_SOLAR_ABSORPTIVITY, ORIENTATIONS, SOLAR_IRRADIANCE_TABLE_W_M2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,6 +44,36 @@ def build_parser() -> argparse.ArgumentParser:
                          help="Outdoor air temperature in C")
     parser.add_argument("--wind-speed", type=float, default=VANCOUVER_WINTER_DESIGN.wind_speed_mps,
                          help="Reference (10 m) wind speed in m/s")
+    parser.add_argument(
+        "--orientation",
+        choices=ORIENTATIONS,
+        default="S",
+        help="Building elevation orientation the window faces (default: S)",
+    )
+    parser.add_argument(
+        "--frame-colour", "--frame-color",
+        dest="frame_colour",
+        choices=sorted(FRAME_COLOR_SOLAR_ABSORPTIVITY),
+        default="white",
+        help="Vinyl frame colour, sets solar absorptivity (default: white)",
+    )
+    parser.add_argument(
+        "--solar-scenario",
+        choices=sorted(SOLAR_IRRADIANCE_TABLE_W_M2),
+        default="winter_design",
+        help=(
+            "Solar loading scenario: winter_design (no sun, worst case for "
+            "condensation, default), winter_sunny (clear winter noon), or "
+            "summer_peak (clear summer peak, for overheating/warping checks)"
+        ),
+    )
+    parser.add_argument(
+        "--solar-irradiance",
+        type=float,
+        default=None,
+        help="Override incident solar irradiance directly, in W/m^2, instead "
+        "of using the orientation/scenario table",
+    )
     return parser
 
 
@@ -65,12 +96,22 @@ def main(argv=None) -> int:
         wind_speed_mps=args.wind_speed,
     )
 
-    result = compute_frame_temperature(frame, storey=args.storey, climate=climate)
+    result = compute_frame_temperature(
+        frame,
+        storey=args.storey,
+        climate=climate,
+        orientation=args.orientation,
+        frame_color=args.frame_colour,
+        solar_scenario=args.solar_scenario,
+        solar_irradiance_override_w_m2=args.solar_irradiance,
+    )
 
     print(f"Frame: {frame.name} (NFRC U-factor {frame.nfrc_u_factor_w_m2k:.2f} W/m^2K)")
-    print(f"Storey: {args.storey}")
+    print(f"Storey: {args.storey}, orientation: {args.orientation}, colour: {args.frame_colour}")
     print(f"Indoor: {climate.indoor_temp_c:.1f} C @ {climate.indoor_rh_pct:.0f}% RH")
     print(f"Outdoor: {climate.outdoor_temp_c:.1f} C, reference wind {climate.wind_speed_mps:.1f} m/s")
+    print(f"Solar: {args.solar_scenario} scenario, {result.solar_irradiance_w_m2:.0f} W/m^2 incident, "
+          f"sol-air temp {result.sol_air_temp_c:.1f} C")
     print("-" * 50)
     print(f"Interior frame surface temperature: {result.interior_surface_temp_c:.1f} C")
     print(f"Exterior frame surface temperature: {result.exterior_surface_temp_c:.1f} C")
@@ -79,6 +120,7 @@ def main(argv=None) -> int:
     print(f"Heat flux:                          {result.heat_flux_w_m2:.1f} W/m^2")
     print(f"Temperature index (CSA A440-style): {result.temperature_index_pct:.0f}%")
     print(f"Condensation risk on frame:         {'YES' if result.condensation_risk else 'no'}")
+    print(f"Frame heat distortion risk:         {'YES' if result.frame_distortion_risk else 'no'}")
 
     return 0
 

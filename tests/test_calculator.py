@@ -2,8 +2,9 @@ import math
 import unittest
 
 from window_frame_temp.calculator import compute_frame_temperature
-from window_frame_temp.climate import VANCOUVER_WINTER_DESIGN, dew_point_c
+from window_frame_temp.climate import ClimateDesignPoint, VANCOUVER_WINTER_DESIGN, dew_point_c
 from window_frame_temp.frame import FrameProfile, get_frame_profile
+from window_frame_temp.solar import frame_color_absorptivity, solar_irradiance_w_m2
 from window_frame_temp.wind import exterior_film_coefficient, wind_speed_at_storey
 
 
@@ -103,6 +104,101 @@ class ComputeFrameTemperatureTests(unittest.TestCase):
         )
         result = compute_frame_temperature(frame, storey=1, climate=climate)
         self.assertTrue(math.isclose(result.interior_surface_temp_c, 10.0, abs_tol=1e-6))
+
+
+class SolarLookupTests(unittest.TestCase):
+    def test_winter_design_scenario_has_no_solar(self):
+        for orientation in ("N", "S", "E", "W"):
+            self.assertEqual(solar_irradiance_w_m2("winter_design", orientation), 0.0)
+
+    def test_west_gets_more_summer_sun_than_north(self):
+        self.assertGreater(
+            solar_irradiance_w_m2("summer_peak", "W"),
+            solar_irradiance_w_m2("summer_peak", "N"),
+        )
+
+    def test_south_gets_more_winter_sun_than_north(self):
+        self.assertGreater(
+            solar_irradiance_w_m2("winter_sunny", "S"),
+            solar_irradiance_w_m2("winter_sunny", "N"),
+        )
+
+    def test_unknown_scenario_raises(self):
+        with self.assertRaises(ValueError):
+            solar_irradiance_w_m2("spring", "S")
+
+    def test_unknown_orientation_raises(self):
+        with self.assertRaises(ValueError):
+            solar_irradiance_w_m2("summer_peak", "SSE")
+
+    def test_dark_colours_absorb_more_than_light(self):
+        self.assertGreater(frame_color_absorptivity("black"), frame_color_absorptivity("white"))
+
+    def test_unknown_colour_raises(self):
+        with self.assertRaises(ValueError):
+            frame_color_absorptivity("red")
+
+
+class OrientationAndColourEffectTests(unittest.TestCase):
+    def test_no_solar_gain_matches_original_winter_default(self):
+        frame = get_frame_profile("standard_vinyl")
+        result = compute_frame_temperature(frame, storey=1)
+        self.assertEqual(result.sol_air_temp_c, VANCOUVER_WINTER_DESIGN.outdoor_temp_c)
+        self.assertEqual(result.solar_irradiance_w_m2, 0.0)
+
+    def test_sunny_winter_orientation_warms_frame_vs_no_sun(self):
+        frame = get_frame_profile("standard_vinyl")
+        no_sun = compute_frame_temperature(frame, storey=1, solar_scenario="winter_design")
+        sunny_south = compute_frame_temperature(
+            frame, storey=1, orientation="S", solar_scenario="winter_sunny"
+        )
+        self.assertGreater(
+            sunny_south.exterior_surface_temp_c, no_sun.exterior_surface_temp_c
+        )
+        self.assertGreater(
+            sunny_south.interior_surface_temp_c, no_sun.interior_surface_temp_c
+        )
+
+    def test_darker_frame_runs_hotter_under_solar_load(self):
+        frame = get_frame_profile("standard_vinyl")
+        white = compute_frame_temperature(
+            frame, storey=1, orientation="W", solar_scenario="summer_peak", frame_color="white"
+        )
+        black = compute_frame_temperature(
+            frame, storey=1, orientation="W", solar_scenario="summer_peak", frame_color="black"
+        )
+        self.assertGreater(black.exterior_surface_temp_c, white.exterior_surface_temp_c)
+
+    def test_frame_distortion_risk_flagged_for_hot_dark_frame(self):
+        frame = get_frame_profile("standard_vinyl")
+        hot_climate = ClimateDesignPoint(
+            indoor_temp_c=24.0, indoor_rh_pct=45.0, outdoor_temp_c=30.0, wind_speed_mps=1.5
+        )
+        black = compute_frame_temperature(
+            frame,
+            storey=1,
+            climate=hot_climate,
+            frame_color="black",
+            solar_irradiance_override_w_m2=900,
+        )
+        white = compute_frame_temperature(
+            frame,
+            storey=1,
+            climate=hot_climate,
+            frame_color="white",
+            solar_irradiance_override_w_m2=900,
+        )
+        self.assertTrue(black.frame_distortion_risk)
+        self.assertFalse(white.frame_distortion_risk)
+
+    def test_solar_irradiance_override_takes_precedence_over_table(self):
+        frame = get_frame_profile("standard_vinyl")
+        result = compute_frame_temperature(
+            frame, storey=1, orientation="N", solar_scenario="winter_design",
+            solar_irradiance_override_w_m2=500.0,
+        )
+        self.assertEqual(result.solar_irradiance_w_m2, 500.0)
+        self.assertGreater(result.sol_air_temp_c, VANCOUVER_WINTER_DESIGN.outdoor_temp_c)
 
 
 if __name__ == "__main__":
